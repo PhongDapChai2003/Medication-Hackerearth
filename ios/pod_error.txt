@@ -1,0 +1,20 @@
+Analyzing dependencies
+cloud_firestore: Using user specified Firebase SDK version '10.24.0'
+firebase_auth: Using user specified Firebase SDK version '10.24.0'
+firebase_core: Using user specified Firebase SDK version '10.24.0'
+[!] CocoaPods could not find compatible versions for pod "nanopb":
+  In Podfile:
+    cloud_firestore (from `.symlinks/plugins/cloud_firestore/ios`) was resolved to 4.15.8, which depends on
+      Firebase/Firestore (= 10.24.0) was resolved to 10.24.0, which depends on
+        FirebaseFirestore (~> 10.24.0) was resolved to 10.24.0, which depends on
+          FirebaseFirestoreInternal (= 10.24.0) was resolved to 10.24.0, which depends on
+            nanopb (< 2.30911.0, >= 2.30908.0)
+
+    cloud_firestore (from `.symlinks/plugins/cloud_firestore/ios`) was resolved to 4.15.8, which depends on
+      nanopb (< 2.30910.0, >= 2.30908.0)
+
+    google_mlkit_commons (from `.symlinks/plugins/google_mlkit_commons/ios`) was resolved to 0.11.1, which depends on
+      MLKitVision (~> 10.0.0) was resolved to 10.0.0, which depends on
+        MLKitCommon (~> 14.0) was resolved to 14.0.0, which depends on
+          GoogleDataTransport (~> 10.0) was resolved to 10.1.0, which depends on
+            nanopb (~> 3.30910.0)

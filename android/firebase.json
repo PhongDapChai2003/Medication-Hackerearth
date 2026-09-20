@@ -1,0 +1,28 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "medication-reminder-90690",
+          "appId": "1:830993798432:android:daaa6c365ef7eba15a7345",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "medication-reminder-90690",
+          "configurations": {
+            "android": "1:830993798432:android:daaa6c365ef7eba15a7345",
+            "ios": "1:830993798432:ios:a5a79ddca3236ce95a7345",
+            "macos": "1:830993798432:ios:ef77245642c0c49a5a7345",
+            "web": "1:830993798432:web:bdf4dc07cf0f60805a7345",
+            "windows": "1:830993798432:web:605391c5f227cd625a7345"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+name: flutter_application_1
+description: "Medication reminder app with OCR, dose history, refill warnings, authentication, offline storage, and private Firebase sync."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Matched modern FlutterFire release set for Xcode 26.
+  firebase_core: 4.11.0
+  firebase_auth: 6.5.4
+  cloud_firestore: 6.6.0
+  firebase_app_check: 0.4.5
+  firebase_crashlytics: 5.2.4
+
+  flutter_local_notifications: 21.0.0
+
+  flutter_timezone: ^5.1.0
+  image_picker: ^1.1.2
+  shared_preferences: ^2.5.5
+  flutter_secure_storage: 9.2.4
+  cryptography: 2.7.0
+  http: ^1.6.0
+  timezone: ^0.11.0
+  url_launcher: ^6.3.2
+  google_mlkit_text_recognition: 0.16.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  ios: true
+  android: false
+  image_path: "assets/app_icon.png"
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/app_icon.png

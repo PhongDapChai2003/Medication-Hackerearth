@@ -1,0 +1,48 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAccountOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Temporary read/delete access keeps the automatic schema-v1 migration safe.
+    match /users/{userId}/private/medications {
+      allow read, delete: if isAccountOwner(userId);
+      allow create, update: if false;
+    }
+
+    match /users/{userId}/medications/{medicationId} {
+      allow read, delete: if isAccountOwner(userId);
+      allow create, update: if isAccountOwner(userId)
+        && request.resource.data.ownerUid == userId
+        && request.resource.data.id == medicationId
+        && request.resource.data.schemaVersion == 2
+        && request.resource.data.updatedAt is string
+        && request.resource.data.deleted is bool;
+
+      match /doseRecords/{recordId} {
+        allow read, delete: if isAccountOwner(userId);
+        allow create, update: if isAccountOwner(userId)
+          && request.resource.data.ownerUid == userId
+          && request.resource.data.schemaVersion == 2
+          && request.resource.data.recordKey is string
+          && request.resource.data.updatedAt is string
+          && request.resource.data.deleted is bool;
+      }
+    }
+
+    match /users/{userId}/settings/preferences {
+      allow read, delete: if isAccountOwner(userId);
+      allow create, update: if isAccountOwner(userId)
+        && request.resource.data.ownerUid == userId
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.values is map
+        && request.resource.data.updatedAt is string;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
