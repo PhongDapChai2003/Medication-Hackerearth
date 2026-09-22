@@ -1,4 +1,0 @@
-interface:
-  display_name: "Four-Agent Ship"
-  short_description: "Plan, build, test, and review code changes"
-  default_prompt: "Use $four-agent-ship to implement this feature with separate planner, coder, tester, and reviewer stages."

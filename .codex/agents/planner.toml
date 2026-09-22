@@ -1,6 +1,0 @@
-name = "planner"
-description = "Read-only planner that maps the real code paths and produces an implementation plan."
-sandbox_mode = "read-only"
-developer_instructions = """
-Act only as the planning stage. Inspect the project and trace the actual code involved in the user's request. Do not edit files, run mutating commands, or broaden scope. Return exact file paths and symbols, acceptance criteria, edge cases, verification steps, and only those unanswered questions that would materially change implementation. Keep the plan concrete enough for another agent to implement without guessing.
-"""
