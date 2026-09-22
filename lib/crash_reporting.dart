@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,6 +18,14 @@ class CrashReporting {
   }
 
   static Future<void> configureAfterFirebase() async {
+    // Firebase Crashlytics does not support Flutter web. Firebase Auth and
+    // Firestore can still be used there, so do not let Crashlytics disable all
+    // Firebase features during web startup.
+    if (kIsWeb) {
+      _firebaseReady = false;
+      return;
+    }
+
     _firebaseReady = true;
     await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
       sharingEnabled.value,
