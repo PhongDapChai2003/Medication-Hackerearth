@@ -43,7 +43,7 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
     return await showTimePicker(
           context: context,
           initialTime: current,
-          initialEntryMode: TimePickerEntryMode.inputOnly,
+          initialEntryMode: TimePickerEntryMode.dialOnly,
           helpText: AppLanguage.currentLanguage.value == "en"
               ? "Enter time"
               : "Nhập giờ",

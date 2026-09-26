@@ -1,64 +1,109 @@
-# Smart pill box setup: 10 compartments
+# Smart pill box setup: 7-compartment Bluetooth red/green matrix
 
-This version uses 10 ordinary two-leg LEDs and 10 normally-open lid switches in a 2 x 5 arrangement. D11 is not used.
+This version follows the 3 x 7 matrix drawing. Each compartment has one
+three-leg common-anode red/green LED and one normally-open magnetic reed
+switch. The LED and sensor share the compartment column. Each reed branch
+requires a 1N4148 isolation diode so closed lids cannot connect LED columns
+together and create ghost lights.
 
 ## Pin map
 
-### LEDs
+- D2: all red LED cathodes
+- D3: all green LED cathodes
+- D4: common reed-switch row
+- D5: compartment 1 column
+- D6: compartment 2 column
+- D7: compartment 3 column
+- D8: compartment 4 column
+- D9: compartment 5 column
+- D10: compartment 6 column
+- D11: compartment 7 column
+- D12: active-buzzer signal
 
-- LED row 1: D2 through a 470 ohm resistor
-- LED row 2: D3 through a 470 ohm resistor
-- LED columns 1-5: A0, A1, A2, A3, A4
+## LED wiring
 
-Connect each LED long leg (anode) to its column. Connect its short or flat-side leg (cathode) to its row. The program lights only one compartment at a time.
+For every compartment:
 
-### Lid switches
+1. Connect its LED common-anode leg to its D5-D11 column through one 330-ohm,
+   1/4-watt resistor.
+2. Connect its red cathode to D2.
+3. Connect its green cathode to D3.
 
-- Switch rows: D4 and D5
-- Switch columns: D6, D7, D8, D9, D10
-- Use the COM and normally-open terminals so the switch reads LOW when the lid is opened.
-- D11 is unused.
+The firmware lights only one color and one compartment at a time, so the red
+and green dies can share the column resistor. If both colors must ever be lit
+together, redesign the current limiting so each color has its own resistor.
 
-If several lids may be open together, add one isolation diode to each switch to prevent false matrix readings.
+## Magnetic reed-switch wiring
 
-### Buzzer
+For every compartment:
 
-- Buzzer signal: A5
-- Buzzer ground: GND
+1. Connect D4 to the non-striped end (anode) of a 1N4148 diode.
+2. Connect the striped end (cathode) of the diode to one reed-switch lead.
+3. Connect the other reed-switch lead to that compartment's D5-D11 column,
+   after the column resistor.
+4. Put the magnet on the moving lid and the reed switch on the fixed box.
 
-Use a suitable transistor driver if the buzzer requires more current than an Arduino pin can safely supply.
+Use seven 1N4148 diodes total, one for each reed switch. The stripe must face
+the compartment column. Without these diodes, several closed lids can connect
+the columns together and illuminate the wrong LEDs.
 
-## Compartment order
+The specified reed switch is normally open. With the magnet near the switch,
+the closed lid closes the electrical contact. Opening the lid moves the magnet
+away and opens the contact. The firmware handles this inverted lid logic.
 
-Top row: 1, 2, 3, 4, 5
+## Active buzzer wiring
 
-Bottom row: 6, 7, 8, 9, 10
+- VCC: Arduino 5V
+- GND: Arduino GND
+- I/O or SIG: D12
+
+The selected module is treated as low-level triggered: D12 LOW sounds it and
+D12 HIGH turns it off. If the physical module behaves in reverse, swap the two
+levels in `wrongLidAlarm()` and `configureHardware()`.
 
 ## Behavior
 
-1. At medication time, the phone sends the assigned compartment number.
-2. The correct compartment LED blinks.
-3. Opening the correct lid changes the LED to a steady light.
-4. Closing the correct lid turns the LED off.
-5. Opening a wrong lid makes the buzzer beep three times.
+1. At a saved medication time, the assigned compartment turns solid green.
+2. Opening the correct lid turns the green light off and completes the reminder.
+3. Opening a wrong lid makes that wrong compartment blink red and repeats a
+   quieter original two-chirp alert. The correct compartment remains visibly
+   green while the wrong red light blinks.
+4. Closing the wrong lid stops the buzzer and restores the correct green light.
+5. The Arduino scans LEDs and reed switches at different times so their shared
+   matrix connections do not fight each other.
 
 ## Upload and test
 
-1. Disconnect USB power before changing any wiring.
-2. Connect only one LED, one switch, and the buzzer for the first test.
-3. Reconnect the UNO R4 WiFi by USB.
-4. Open pill_box_led.ino in Arduino IDE.
-5. Select Arduino UNO R4 WiFi and its USB port.
-6. Select Verify, then Upload.
-7. Open Serial Monitor at 115200 baud.
+1. Disconnect USB power before changing wiring.
+2. First connect only compartment 1: its LED, 330-ohm resistor, 1N4148 diode,
+   and reed switch.
+3. Check for accidental 5V-to-GND shorts with a multimeter.
+4. Reconnect the UNO R4 WiFi by USB.
+5. Open `pill_box_led.ino` in Arduino IDE.
+6. Select **Arduino UNO R4 WiFi** and the detected USB port.
+7. Select Verify, then Upload.
+8. Open Serial Monitor at 115200 baud.
+9. Confirm startup shows red then green for each connected compartment.
+10. In the app, connect by Bluetooth and test compartment 1 before connecting
+    the remaining six.
 
-## Connect the phone app
+For an incremental breadboard test, disconnected reed inputs are ignored. A
+connected lid becomes active after the firmware detects it closed once. Keep
+the magnet next to the reed switch before starting the reminder, then move the
+magnet away to test an opening.
 
-1. Connect the phone to Medication-Pill-Box.
-2. Use password pillbox21.
-3. Open Settings -> Smart Pill Box.
-4. Keep the Arduino address as 192.168.4.1.
-5. Select Test connection.
-6. Add or edit a medication and assign it to compartment 1-10.
+## Connect the phone app by Bluetooth
 
-The assigned light can start automatically at its reminder minute while the app is running and the phone is connected to the pill-box Wi-Fi. Tapping a medication notification also attempts to send the command. A notification appearing while the app is completely closed cannot reliably run this local network request on every phone.
+1. Keep the UNO R4 WiFi powered and near the phone.
+2. Keep the phone on its normal Wi-Fi or mobile data; do not change networks.
+3. Turn on Bluetooth on the phone.
+4. Open Settings -> Smart Pill Box.
+5. Select **Connect pill box** and allow Bluetooth access when asked.
+6. Assign each medication to compartment 1-7.
+
+The app uploads the saved medication schedule and clock after Bluetooth
+connects. The Arduino can then turn the assigned compartment green at the saved
+minute without the app staying connected, provided the board remains powered.
+Opening the correct lid turns the green light off. Opening a wrong lid keeps the
+correct green guide lit, blinks that wrong compartment red, and plays the alert
+rhythm until the wrong lid closes.

@@ -46,14 +46,8 @@
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera to take a photo of your prescription label and help fill medication details.</string>
 
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>This app connects to your smart pill box on your local Wi-Fi network.</string>
-
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app uses Bluetooth to connect to your nearby smart pill box and send medication reminders.</string>
 
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app lets you choose prescription label photos from your photo library to scan medication details.</string>

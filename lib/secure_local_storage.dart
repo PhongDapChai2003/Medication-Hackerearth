@@ -15,10 +15,9 @@ class SecureLocalStorage {
 
   static Future<String?> getString(String key) async {
     final preferences = await SharedPreferences.getInstance();
-    // Notification actions run in a separate Dart isolate on iPhone. Reload
-    // the shared preferences cache so the visible app can immediately read a
-    // Taken or Missed update written by that background isolate.
-    await preferences.reload();
+    // External notification actions are detected by MedicationStorage's
+    // revision monitor. Reloading on every ordinary read can block later
+    // writes on iOS, so normal form saves use the current cache immediately.
     final savedValue = preferences.getString(key);
 
     if (savedValue == null || savedValue.isEmpty) {

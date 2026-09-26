@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'medication.dart';
 
@@ -135,6 +136,13 @@ class CloudMedicationService {
           .toSet();
 
       for (final legacyMedication in legacySnapshot!.medications) {
+        if (isLegacyMedicationDeleted(
+          legacyMedication.id,
+          tombstones,
+        )) {
+          continue;
+        }
+
         final hasMatchingId =
             legacyMedication.id.trim().isNotEmpty &&
             medications.any((item) => item.id == legacyMedication.id);
@@ -157,6 +165,15 @@ class CloudMedicationService {
     );
   }
 
+  @visibleForTesting
+  static bool isLegacyMedicationDeleted(
+    String medicationId,
+    Map<String, String> tombstones,
+  ) {
+    final id = medicationId.trim();
+    return id.isNotEmpty && tombstones.containsKey(id);
+  }
+
   static Future<CloudMedicationSnapshot> _downloadLegacyMedications(
     String userId,
   ) async {
@@ -169,7 +186,10 @@ class CloudMedicationService {
     final data = document.data();
     final rawMedications = data?["medications"];
     final medications = <Medication>[];
-    final migrationTime = DateTime.now().toUtc().toIso8601String();
+    // Legacy records do not carry reliable edit timestamps. Do not stamp them
+    // with "now": that makes an old deleted record look newer than its
+    // tombstone and causes it to be restored on the next sync.
+    const legacyFallbackUpdatedAt = '1970-01-01T00:00:00.000Z';
 
     if (rawMedications is List) {
       for (final item in rawMedications) {
@@ -182,7 +202,7 @@ class CloudMedicationService {
           medications.add(
             medication.copyWith(
               updatedAt: medication.updatedAt.trim().isEmpty
-                  ? migrationTime
+                  ? legacyFallbackUpdatedAt
                   : medication.updatedAt,
             ),
           );

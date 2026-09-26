@@ -1100,7 +1100,7 @@ class _ReminderPageState extends State<ReminderPage> {
     return showTimePicker(
       context: context,
       initialTime: initialTime,
-      initialEntryMode: TimePickerEntryMode.inputOnly,
+      initialEntryMode: TimePickerEntryMode.input,
       helpText: AppLanguage.currentLanguage.value == "en"
           ? "Enter reminder time"
           : "Nhập giờ nhắc",

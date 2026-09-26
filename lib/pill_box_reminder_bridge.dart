@@ -8,6 +8,13 @@ import 'medication_storage.dart';
 import 'pill_box_service.dart';
 import 'time_helper.dart';
 
+class PillBoxScheduleEntry {
+  const PillBoxScheduleEntry({required this.slot, required this.minuteOfDay});
+
+  final int slot;
+  final int minuteOfDay;
+}
+
 class PillBoxReminderBridge {
   PillBoxReminderBridge._();
 
@@ -20,6 +27,70 @@ class PillBoxReminderBridge {
       unawaited(checkNow());
     });
     unawaited(checkNow());
+    unawaited(syncScheduleNow());
+  }
+
+  static Future<bool> syncScheduleNow({DateTime? clock}) async {
+    final now = clock ?? DateTime.now();
+
+    try {
+      final medications = await MedicationStorage.loadCurrentLocalMedications();
+      final entries = buildScheduleEntries(medications, now);
+      if (entries.length > PillBoxService.maxScheduleEntries) return false;
+      final service = PillBoxService();
+
+      try {
+        final cleared = await service.clearSchedule();
+        if (!cleared.ok) return false;
+
+        for (final entry in entries) {
+          final added = await service.addSchedule(
+            slot: entry.slot,
+            minuteOfDay: entry.minuteOfDay,
+          );
+          if (!added.ok) return false;
+        }
+
+        final clockResult = await service.synchronizeClock(now);
+        return clockResult.ok;
+      } finally {
+        service.close();
+      }
+    } catch (_) {
+      // Phone notifications remain available when the box is disconnected.
+      return false;
+    }
+  }
+
+  static List<PillBoxScheduleEntry> buildScheduleEntries(
+    Iterable<Medication> medications,
+    DateTime date,
+  ) {
+    final entries = <PillBoxScheduleEntry>[];
+    final seen = <String>{};
+
+    for (final medication in medications) {
+      if (!_canUseMedication(medication, date)) continue;
+
+      for (final savedTime in medication.reminderTimes) {
+        final time = TimeHelper.stringToTime(savedTime);
+        final minuteOfDay = (time.hour * 60) + time.minute;
+        final key = '${medication.pillBoxSlot}|$minuteOfDay';
+        if (!seen.add(key)) continue;
+        entries.add(
+          PillBoxScheduleEntry(
+            slot: medication.pillBoxSlot,
+            minuteOfDay: minuteOfDay,
+          ),
+        );
+      }
+    }
+
+    entries.sort((a, b) {
+      final timeComparison = a.minuteOfDay.compareTo(b.minuteOfDay);
+      return timeComparison != 0 ? timeComparison : a.slot.compareTo(b.slot);
+    });
+    return entries;
   }
 
   static void stop() {
@@ -48,11 +119,7 @@ class PillBoxReminderBridge {
 
           final service = PillBoxService();
           try {
-            final address = await PillBoxService.loadAddress();
-            final result = await service.lightSlot(
-              address,
-              medication.pillBoxSlot,
-            );
+            final result = await service.lightSlot(medication.pillBoxSlot);
             if (result.ok) {
               await preferences.setString(_lastTriggerKey, triggerKey);
             }
@@ -81,11 +148,7 @@ class PillBoxReminderBridge {
 
       final service = PillBoxService();
       try {
-        final address = await PillBoxService.loadAddress();
-        final result = await service.lightSlot(
-          address,
-          medication.first.pillBoxSlot,
-        );
+        final result = await service.lightSlot(medication.first.pillBoxSlot);
         return result.ok;
       } finally {
         service.close();

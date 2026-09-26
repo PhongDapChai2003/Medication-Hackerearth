@@ -38,29 +38,93 @@ import 'time_helper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MedicationReminderApp());
+}
 
-  await AppLanguage.loadSavedLanguage();
-  await AppTheme.loadSavedTheme();
-  await AppTextSize.loadSavedTextSize();
-  await SchedulePreferences.load();
-  await CrashReporting.loadPreference();
-  CrashReporting.installGlobalHandlers();
-  TimeHelper.applyDeviceTimeFormat(
-    WidgetsBinding.instance.platformDispatcher.alwaysUse24HourFormat,
-  );
-  await MedicationStorage.startExternalChangeMonitoring();
+class MedicationReminderApp extends StatefulWidget {
+  const MedicationReminderApp({super.key});
 
-  bool firebaseAvailable = false;
+  @override
+  State<MedicationReminderApp> createState() => _MedicationReminderAppState();
+}
 
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+class _MedicationReminderAppState extends State<MedicationReminderApp> {
+  bool _startupComplete = false;
+  bool _firebaseAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    CrashReporting.installGlobalHandlers();
+    TimeHelper.applyDeviceTimeFormat(
+      WidgetsBinding.instance.platformDispatcher.alwaysUse24HourFormat,
     );
-    AuthService.setFirebaseAvailable(true);
-    firebaseAvailable = true;
-    await CrashReporting.configureAfterFirebase();
+    unawaited(_loadLocalSettings());
+    unawaited(_startLocalServices());
+    unawaited(_initializeFirebase());
+    unawaited(_initializeNotifications());
+    PillBoxReminderBridge.start();
+  }
 
+  Future<void> _loadLocalSettings() async {
+    final loaders = <Future<void> Function()>[
+      AppLanguage.loadSavedLanguage,
+      AppTheme.loadSavedTheme,
+      AppTextSize.loadSavedTextSize,
+      SchedulePreferences.load,
+      CrashReporting.loadPreference,
+    ];
+
+    await Future.wait(
+      loaders.map((load) async {
+        try {
+          await load();
+        } catch (error, stackTrace) {
+          debugPrint(
+            'Could not load a saved app preference: $error\n$stackTrace',
+          );
+        }
+      }),
+    );
+  }
+
+  Future<void> _startLocalServices() async {
     try {
+      await MedicationStorage.startExternalChangeMonitoring();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Local medication change monitoring failed: $error\n$stackTrace',
+      );
+    }
+  }
+
+  Future<void> _initializeFirebase() async {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ).timeout(const Duration(seconds: 12));
+      AuthService.setFirebaseAvailable(true);
+
+      if (!mounted) return;
+      setState(() {
+        _firebaseAvailable = true;
+        _startupComplete = true;
+      });
+
+      unawaited(_configureFirebaseServices());
+    } catch (error, stackTrace) {
+      AuthService.setFirebaseAvailable(false);
+      debugPrint(
+        'Firebase startup failed; continuing with local data: $error\n$stackTrace',
+      );
+      if (!mounted) return;
+      setState(() => _startupComplete = true);
+    }
+  }
+
+  Future<void> _configureFirebaseServices() async {
+    try {
+      await CrashReporting.configureAfterFirebase();
       await FirebaseAppCheck.instance.activate(
         providerAndroid: kDebugMode
             ? const AndroidDebugProvider()
@@ -75,34 +139,33 @@ Future<void> main() async {
           'Register the debug token printed by Firebase in the App Check console.',
         );
       }
-    } catch (_) {
-      // App Check enforcement is configured in Firebase Console after testing.
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Optional Firebase startup service failed: $error\n$stackTrace',
+      );
     }
 
-    await MedicationStorage.startCloudSyncMonitoring();
-    await AccountPreferencesSync.start();
-  } catch (_) {
-    AuthService.setFirebaseAvailable(false);
+    try {
+      await MedicationStorage.startCloudSyncMonitoring();
+      await AccountPreferencesSync.start();
+    } catch (error, stackTrace) {
+      debugPrint('Cloud sync startup failed: $error\n$stackTrace');
+    }
   }
 
-  try {
-    NotificationService.configureNotificationResponseHandler(
-      NotificationActionHandler.handle,
-      backgroundHandler: medicationNotificationActionBackground,
-    );
-    await NotificationService.initialize();
-  } catch (_) {
-    // Keep the app running when notifications are unavailable.
+  Future<void> _initializeNotifications() async {
+    try {
+      NotificationService.configureNotificationResponseHandler(
+        NotificationActionHandler.handle,
+        backgroundHandler: medicationNotificationActionBackground,
+      );
+      await NotificationService.initialize();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Notifications unavailable during startup: $error\n$stackTrace',
+      );
+    }
   }
-
-  runApp(MedicationReminderApp(firebaseAvailable: firebaseAvailable));
-  PillBoxReminderBridge.start();
-}
-
-class MedicationReminderApp extends StatelessWidget {
-  final bool firebaseAvailable;
-
-  const MedicationReminderApp({super.key, required this.firebaseAvailable});
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +195,9 @@ class MedicationReminderApp extends StatelessWidget {
                       child: child ?? const SizedBox.shrink(),
                     );
                   },
-                  home: firebaseAvailable
+                  home: !_startupComplete
+                      ? const _AppStartupPage()
+                      : _firebaseAvailable
                       ? const MedicationAuthGate()
                       : const HomePage(),
                 );
@@ -141,6 +206,40 @@ class MedicationReminderApp extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _AppStartupPage extends StatelessWidget {
+  const _AppStartupPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: AppTheme.pageDecoration(),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.medication_rounded,
+                size: 52,
+                color: AppTheme.primaryColor,
+              ),
+              const SizedBox(height: 18),
+              Text(
+                AppLanguage.tr('Medication Reminder', 'Nhắc Nhở Uống Thuốc'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 20),
+              CircularProgressIndicator(color: AppTheme.primaryColor),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -5619,8 +5718,8 @@ class _HomeSettingsSheetState extends State<HomeSettingsSheet> {
                             icon: Icons.lightbulb_circle_rounded,
                             title: tr("Smart Pill Box", "Hộp thuốc thông minh"),
                             subtitle: tr(
-                              "Connect and test the 10 compartment pill box",
-                              "Kết nối và thử hộp thuốc 10 ngăn",
+                              "Connect and test the 7-compartment pill box",
+                              "Kết nối và thử hộp thuốc 7 ngăn",
                             ),
                             onTap: openSmartPillBox,
                           ),

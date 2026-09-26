@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_language.dart';
@@ -8,6 +9,7 @@ import 'date_helper.dart';
 import 'healthcare_place_search.dart';
 import 'medication.dart';
 import 'medication_storage.dart';
+import 'pill_box_reminder_bridge.dart';
 import 'rxnorm_service.dart';
 import 'smooth_action_button.dart';
 import 'time_helper.dart';
@@ -594,11 +596,9 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
   }
 
   Future<void> addCustomReminderTime() async {
-    final pickedTime = await showTimePicker(
-      context: context,
+    final pickedTime = await pickReminderTime(
       initialTime: const TimeOfDay(hour: 8, minute: 0),
-      initialEntryMode: TimePickerEntryMode.inputOnly,
-      helpText: tr("Enter reminder time", "Nhập giờ nhắc"),
+      title: tr("Add reminder time", "Thêm giờ nhắc"),
     );
 
     if (pickedTime == null || !mounted) {
@@ -631,11 +631,9 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
       return;
     }
 
-    final pickedTime = await showTimePicker(
-      context: context,
+    final pickedTime = await pickReminderTime(
       initialTime: customReminderTimes[index],
-      initialEntryMode: TimePickerEntryMode.inputOnly,
-      helpText: tr("Change reminder time", "Đổi giờ nhắc"),
+      title: tr("Change reminder time", "Đổi giờ nhắc"),
     );
 
     if (pickedTime == null || !mounted) {
@@ -662,6 +660,100 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
         return (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute);
       });
     });
+  }
+
+  Future<TimeOfDay?> pickReminderTime({
+    required TimeOfDay initialTime,
+    required String title,
+  }) {
+    final now = DateTime.now();
+    var selectedTime = initialTime;
+    final initialDateTime = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      initialTime.hour,
+      initialTime.minute,
+    );
+
+    return showCupertinoModalPopup<TimeOfDay>(
+      context: context,
+      builder: (pickerContext) {
+        return StatefulBuilder(
+          builder: (context, setPickerState) {
+            final use24HourFormat = MediaQuery.alwaysUse24HourFormatOf(context);
+
+            return Material(
+              color: Colors.transparent,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: CupertinoColors.systemBackground.resolveFrom(context),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(22),
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: const TextStyle(
+                                  color: Color(0xFF1E2A3A),
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              key: const ValueKey<String>(
+                                'reminder-time-cancel',
+                              ),
+                              onPressed: () => Navigator.pop(pickerContext),
+                              child: Text(tr('Cancel', 'Huỷ')),
+                            ),
+                            TextButton(
+                              key: const ValueKey<String>(
+                                'reminder-time-done',
+                              ),
+                              onPressed: () => Navigator.pop(
+                                pickerContext,
+                                selectedTime,
+                              ),
+                              child: Text(tr('Done', 'Xong')),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        height: 210,
+                        child: CupertinoDatePicker(
+                          key: const ValueKey<String>('reminder-time-picker'),
+                          mode: CupertinoDatePickerMode.time,
+                          initialDateTime: initialDateTime,
+                          use24hFormat: use24HourFormat,
+                          onDateTimeChanged: (dateTime) {
+                            setPickerState(() {
+                              selectedTime = TimeOfDay.fromDateTime(dateTime);
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void removeCustomReminderTime(int index) {
@@ -812,28 +904,117 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
 
     try {
       if (existingMedication != null) {
-        final updated = await MedicationStorage.updateMedicationById(
+        await MedicationStorage.upsertMedicationById(
           existingMedication.id,
           savedMedication,
-        );
-        if (!updated) {
-          throw StateError("Medication no longer exists.");
-        }
+        ).timeout(const Duration(seconds: 12));
       } else {
-        await MedicationStorage.saveMedication(savedMedication);
+        await MedicationStorage.saveMedication(
+          savedMedication,
+        ).timeout(const Duration(seconds: 12));
       }
+
+      // The medication is already safely stored. Bluetooth sync happens in
+      // the background so an unavailable pill box cannot block this screen.
+      unawaited(PillBoxReminderBridge.syncScheduleNow());
 
       if (!mounted) {
         return;
       }
 
       Navigator.pop(context, true);
+    } on TimeoutException {
+      if (mounted) {
+        showErrorMessage(
+          "Saving took too long. Your phone's local storage did not respond. Please try again.",
+          "Lưu quá lâu. Bộ nhớ trên điện thoại không phản hồi. Vui lòng thử lại.",
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint("Medication save failed: $error");
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        showErrorMessage(
+          "Medication could not be saved. Please try again.",
+          "Không thể lưu thuốc. Vui lòng thử lại.",
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
           isSaving = false;
         });
       }
+    }
+  }
+
+  Future<void> deleteMedication() async {
+    final medication = widget.medication;
+    if (medication == null || isSaving) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(tr("Delete medication?", "Xoá thuốc?")),
+          content: Text(
+            tr(
+              "Delete ${medication.name}? Its reminder schedule and history will also be removed.",
+              "Xoá ${medication.name}? Lịch nhắc và lịch sử của thuốc cũng sẽ bị xoá.",
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr("Cancel", "Huỷ")),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                tr("Delete", "Xoá"),
+                style: const TextStyle(
+                  color: Color(0xFFDC2626),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => isSaving = true);
+    try {
+      final deleted = await MedicationStorage.deleteMedicationById(
+        medication.id,
+      ).timeout(const Duration(seconds: 12));
+      if (!deleted) {
+        throw StateError("Medication no longer exists.");
+      }
+      unawaited(PillBoxReminderBridge.syncScheduleNow());
+      if (mounted) {
+        // Details may be opened from either the medication list or a reminder
+        // screen. Return to the list route so deleting cannot leave the nested
+        // medication navigator on an empty/removed reminder page.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } on TimeoutException {
+      if (mounted) {
+        showErrorMessage(
+          "Deleting took too long. Please try again.",
+          "Xoá quá lâu. Vui lòng thử lại.",
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        showErrorMessage(
+          "Medication could not be deleted. Please try again.",
+          "Không thể xoá thuốc. Vui lòng thử lại.",
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isSaving = false);
     }
   }
 
@@ -998,10 +1179,11 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
                           useCustomReminderTimes = enabled;
 
                           if (enabled && customReminderTimes.isEmpty) {
-                            customReminderTimes =
-                                TimeHelper.generateReminderTimesFromInstructions(
-                                  scheduleDirections,
-                                );
+                            customReminderTimes = List<TimeOfDay>.of(
+                              TimeHelper.generateReminderTimesFromInstructions(
+                                scheduleDirections,
+                              ),
+                            );
                           }
                         });
                       },
@@ -1027,7 +1209,7 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
                           child: Text(tr("Not assigned", "Chưa gán")),
                         ),
                         ...List<DropdownMenuItem<int>>.generate(
-                          10,
+                          7,
                           (index) => DropdownMenuItem<int>(
                             value: index,
                             child: Text(
@@ -1214,6 +1396,25 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
                       onPressed: isSaving ? null : saveMedication,
                       isLoading: isSaving,
                     ),
+                    if (widget.medication != null) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: isSaving ? null : deleteMedication,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFDC2626),
+                          side: const BorderSide(color: Color(0xFFFCA5A5)),
+                          minimumSize: const Size.fromHeight(54),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        label: Text(
+                          tr("Delete medication", "Xoá thuốc"),
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                   ],
                 ),

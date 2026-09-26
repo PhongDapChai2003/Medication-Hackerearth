@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_language.dart';
 import 'app_theme.dart';
+import 'pill_box_reminder_bridge.dart';
 import 'pill_box_service.dart';
 
 class PillBoxPage extends StatefulWidget {
@@ -13,7 +14,6 @@ class PillBoxPage extends StatefulWidget {
 
 class _PillBoxPageState extends State<PillBoxPage> {
   final PillBoxService service = PillBoxService();
-  final TextEditingController addressController = TextEditingController();
   int selectedSlot = 0;
   bool isSending = false;
   bool? lastRequestWorked;
@@ -22,20 +22,10 @@ class _PillBoxPageState extends State<PillBoxPage> {
   String tr(String english, String vietnamese) =>
       AppLanguage.currentLanguage.value == 'en' ? english : vietnamese;
 
-  @override
-  void initState() {
-    super.initState();
-    loadAddress();
-  }
-
-  Future<void> loadAddress() async {
-    final address = await PillBoxService.loadAddress();
-    if (mounted) addressController.text = address;
-  }
-
   Future<void> runRequest(
-    Future<PillBoxResponse> Function(String address) action,
-  ) async {
+    Future<PillBoxResponse> Function() action, {
+    bool syncRemindersAfterSuccess = false,
+  }) async {
     FocusScope.of(context).unfocus();
     setState(() {
       isSending = true;
@@ -45,10 +35,31 @@ class _PillBoxPageState extends State<PillBoxPage> {
 
     PillBoxResponse result;
     try {
-      await PillBoxService.saveAddress(addressController.text);
-      result = await action(addressController.text);
-    } on FormatException catch (error) {
-      result = PillBoxResponse(ok: false, message: error.message.toString());
+      result = await action();
+      if (result.ok && syncRemindersAfterSuccess) {
+        final synchronized = await PillBoxReminderBridge.syncScheduleNow();
+        result = PillBoxResponse(
+          ok: synchronized,
+          message: synchronized
+              ? tr(
+                  'Connected. Reminder times were sent to the pill box.',
+                  'Đã kết nối. Giờ nhắc đã được gửi đến hộp thuốc.',
+                )
+              : tr(
+                  'Connected, but the reminder schedule could not be sent.',
+                  'Đã kết nối, nhưng chưa gửi được lịch nhắc.',
+                ),
+          activeSlot: result.activeSlot,
+        );
+      }
+    } catch (_) {
+      result = PillBoxResponse(
+        ok: false,
+        message: tr(
+          'Bluetooth connection failed. Try again near the pill box.',
+          'Kết nối Bluetooth thất bại. Hãy thử lại gần hộp thuốc.',
+        ),
+      );
     }
 
     if (!mounted) return;
@@ -61,7 +72,6 @@ class _PillBoxPageState extends State<PillBoxPage> {
 
   @override
   void dispose() {
-    addressController.dispose();
     service.close();
     super.dispose();
   }
@@ -106,10 +116,7 @@ class _PillBoxPageState extends State<PillBoxPage> {
                                   ),
                                 ),
                                 Text(
-                                  tr(
-                                    '10 compartments · 2 rows × 5 columns',
-                                    '10 ngăn · 2 hàng × 5 cột',
-                                  ),
+                                  tr('7 compartments', '7 ngăn thuốc'),
                                   style: const TextStyle(
                                     color: AppTheme.mutedInk,
                                     fontWeight: FontWeight.w600,
@@ -124,8 +131,8 @@ class _PillBoxPageState extends State<PillBoxPage> {
                       _Notice(
                         icon: Icons.info_outline_rounded,
                         text: tr(
-                          'When it is time, the assigned compartment blinks. Opening the correct lid keeps its light on. Opening a different lid makes the buzzer beep.',
-                          'Đến giờ, ngăn đã gán sẽ nhấp nháy. Mở đúng nắp thì đèn sáng liên tục. Mở sai nắp thì còi sẽ kêu.',
+                          'When it is time, the assigned compartment turns green. Opening the correct lid turns it off. Opening a different lid blinks red and sounds the alert.',
+                          'Đến giờ, ngăn đã gán sẽ sáng xanh. Mở đúng nắp thì đèn tắt. Mở sai nắp thì đèn đỏ nhấp nháy và còi sẽ kêu.',
                         ),
                       ),
                       const SizedBox(height: 18),
@@ -134,28 +141,31 @@ class _PillBoxPageState extends State<PillBoxPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            TextField(
-                              controller: addressController,
-                              enabled: !isSending,
-                              keyboardType: TextInputType.url,
-                              autocorrect: false,
-                              decoration: InputDecoration(
-                                labelText: tr(
-                                  'Arduino IP address',
-                                  'Địa chỉ IP Arduino',
-                                ),
-                                hintText: PillBoxService.defaultAddress,
-                                prefixIcon: const Icon(Icons.router_outlined),
-                                border: const OutlineInputBorder(),
+                            Text(
+                              tr(
+                                'Keep the pill box powered and near your phone. You do not need to change Wi-Fi networks.',
+                                'Giữ hộp thuốc đang bật và ở gần điện thoại. Bạn không cần đổi mạng Wi-Fi.',
+                              ),
+                              style: const TextStyle(
+                                color: AppTheme.mutedInk,
+                                height: 1.35,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                             const SizedBox(height: 12),
-                            OutlinedButton.icon(
+                            FilledButton.icon(
                               onPressed: isSending
                                   ? null
-                                  : () => runRequest(service.testConnection),
-                              icon: const Icon(Icons.wifi_find_rounded),
-                              label: Text(tr('Test connection', 'Thử kết nối')),
+                                  : () => runRequest(
+                                      service.connect,
+                                      syncRemindersAfterSuccess: true,
+                                    ),
+                              icon: const Icon(
+                                Icons.bluetooth_searching_rounded,
+                              ),
+                              label: Text(
+                                tr('Connect pill box', 'Kết nối hộp thuốc'),
+                              ),
                             ),
                           ],
                         ),
@@ -226,16 +236,13 @@ class _PillBoxPageState extends State<PillBoxPage> {
                               onPressed: isSending
                                   ? null
                                   : () => runRequest(
-                                      (address) => service.lightSlot(
-                                        address,
-                                        selectedSlot,
-                                      ),
+                                      () => service.lightSlot(selectedSlot),
                                     ),
                               icon: const Icon(Icons.light_mode_rounded),
                               label: Text(
                                 tr(
-                                  'Blink compartment ${selectedSlot + 1}',
-                                  'Nhấp nháy ngăn ${selectedSlot + 1}',
+                                  'Light compartment ${selectedSlot + 1}',
+                                  'Bật đèn ngăn ${selectedSlot + 1}',
                                 ),
                               ),
                             ),

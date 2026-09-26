@@ -11,6 +11,7 @@ import 'date_helper.dart';
 import 'firebase_options.dart';
 import 'medication.dart';
 import 'notification_service.dart';
+import 'pill_box_reminder_bridge.dart';
 import 'secure_local_storage.dart';
 import 'time_helper.dart';
 
@@ -199,12 +200,18 @@ class MedicationStorage {
   }
 
   static Future<void> _announceDataChange() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.reload();
-    final revision = DateTime.now().microsecondsSinceEpoch;
-    await preferences.setInt(_persistentRevisionKey, revision);
-    _lastPersistentRevision = revision;
+    // Notify the visible UI before touching platform storage. Notification
+    // actions can use another isolate, and waiting for reload here can block a
+    // medication form even though its encrypted record is already saved.
     dataRevision.value += 1;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final revision = DateTime.now().microsecondsSinceEpoch;
+      await preferences.setInt(_persistentRevisionKey, revision);
+      _lastPersistentRevision = revision;
+    } catch (_) {
+      // The next external-change poll can restore the persistent revision.
+    }
   }
 
   static bool get canUseCloudSync {
@@ -430,7 +437,7 @@ class MedicationStorage {
       deletedDoseRecords: deletedRecords,
       startDate: medication.startDate.trim(),
       endDate: medication.endDate.trim(),
-      pillBoxSlot: medication.pillBoxSlot >= 0 && medication.pillBoxSlot < 10
+      pillBoxSlot: medication.pillBoxSlot >= 0 && medication.pillBoxSlot < 7
           ? medication.pillBoxSlot
           : -1,
       updatedAt: medicationUpdatedAt,
@@ -443,7 +450,7 @@ class MedicationStorage {
   }
 
   static Future<void> saveMedication(Medication medication) async {
-    final medications = await loadMedications();
+    final medications = await loadCurrentLocalMedications();
     medications.add(
       normalizeMedication(
         medication.copyWith(
@@ -458,7 +465,6 @@ class MedicationStorage {
     List<Medication> medications, {
     bool updateNotifications = true,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
     final oldLoad = await _loadLocalForActiveUser();
     final oldById = {for (final item in oldLoad.medications) item.id: item};
     final now = DateTime.now().toUtc().toIso8601String();
@@ -504,34 +510,49 @@ class MedicationStorage {
       key: _activeStorageKey,
       medications: normalizedMedications,
     );
-    await _announceDataChange();
+    unawaited(_announceDataChange());
 
     final userId = currentAccountId;
 
     if (userId.isNotEmpty) {
-      await _writeTombstones(userId, tombstones);
-      await preferences.setBool(_dirtyKeyForUser(userId), true);
-
-      try {
-        await _synchronize(userId: userId);
-      } catch (error) {
-        final diagnosticMessage = await _diagnoseCloudFailure(error);
-        syncStatus.value = MedicationSyncStatus(
-          state: MedicationSyncState.offline,
-          lastSyncedAt: syncStatus.value.lastSyncedAt,
-          message: diagnosticMessage,
-        );
-      }
+      // Account metadata and Firebase are secondary to the encrypted local
+      // save, so neither is allowed to hold the form's loading state open.
+      unawaited(_synchronizeAfterLocalSave(userId, tombstones));
     }
 
     if (updateNotifications) {
-      final latest = await loadCurrentLocalMedications();
-      await rescheduleAllMedicationNotifications(latest);
+      // Permission dialogs and OS notification scheduling must not keep the
+      // medication form stuck on its loading state.
+      unawaited(_rescheduleNotificationsAfterLocalSave());
     }
   }
 
+  static Future<void> _synchronizeAfterLocalSave(
+    String userId,
+    Map<String, String> tombstones,
+  ) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await _writeTombstones(userId, tombstones);
+      await preferences.setBool(_dirtyKeyForUser(userId), true);
+      await _synchronize(userId: userId).timeout(const Duration(seconds: 20));
+    } catch (error) {
+      final diagnosticMessage = await _diagnoseCloudFailure(error);
+      syncStatus.value = MedicationSyncStatus(
+        state: MedicationSyncState.offline,
+        lastSyncedAt: syncStatus.value.lastSyncedAt,
+        message: diagnosticMessage,
+      );
+    }
+  }
+
+  static Future<void> _rescheduleNotificationsAfterLocalSave() async {
+    final latest = await loadCurrentLocalMedications();
+    await rescheduleAllMedicationNotifications(latest);
+  }
+
   static Future<void> updateMedication(int index, Medication medication) async {
-    final medications = await loadMedications();
+    final medications = await loadCurrentLocalMedications();
 
     if (index < 0 || index >= medications.length) return;
 
@@ -545,7 +566,7 @@ class MedicationStorage {
     String medicationId,
     Medication medication,
   ) async {
-    final medications = await loadMedications();
+    final medications = await loadCurrentLocalMedications();
     final index = medications.indexWhere((item) => item.id == medicationId);
 
     if (index < 0) return false;
@@ -557,8 +578,33 @@ class MedicationStorage {
     return true;
   }
 
+  /// Saves an edited medication even when a recent account/cloud refresh has
+  /// not yet copied the original record into the active local list.
+  static Future<void> upsertMedicationById(
+    String medicationId,
+    Medication medication,
+  ) async {
+    final medications = await loadCurrentLocalMedications();
+    final cleanId = medicationId.trim();
+    final index = medications.indexWhere((item) => item.id == cleanId);
+    final normalized = normalizeMedication(
+      medication.copyWith(
+        id: cleanId.isEmpty ? medication.id : cleanId,
+        updatedAt: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+
+    if (index < 0) {
+      medications.add(normalized);
+    } else {
+      medications[index] = normalized;
+    }
+
+    await saveMedicationList(medications);
+  }
+
   static Future<void> deleteMedication(int index) async {
-    final medications = await loadMedications();
+    final medications = await loadCurrentLocalMedications();
 
     if (index < 0 || index >= medications.length) return;
 
@@ -567,7 +613,7 @@ class MedicationStorage {
   }
 
   static Future<bool> deleteMedicationById(String medicationId) async {
-    final medications = await loadMedications();
+    final medications = await loadCurrentLocalMedications();
     final index = medications.indexWhere((item) => item.id == medicationId);
 
     if (index < 0) return false;
@@ -580,7 +626,7 @@ class MedicationStorage {
   static Future<void> mergeMedicationsIntoCurrentUser(
     List<Medication> incomingMedications,
   ) async {
-    final current = await loadMedications();
+    final current = await loadCurrentLocalMedications();
     final merged = _mergeMedicationLists(current, incomingMedications);
     await saveMedicationList(merged);
   }
@@ -984,6 +1030,7 @@ class MedicationStorage {
       final merged = await _synchronize(userId: userId);
       await rescheduleAllMedicationNotifications(merged.medications);
       await _announceDataChange();
+      unawaited(PillBoxReminderBridge.syncScheduleNow());
       return true;
     } catch (error) {
       final diagnosticMessage = await _diagnoseCloudFailure(error);

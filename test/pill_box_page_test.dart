@@ -15,12 +15,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Smart Pill Box'), findsOneWidget);
-    expect(find.text('Test connection'), findsOneWidget);
-    expect(
-      find.text('10 compartments · 2 rows × 5 columns'),
-      findsOneWidget,
-    );
-    expect(find.text('Blink compartment 1'), findsOneWidget);
+    expect(find.text('Connect pill box'), findsOneWidget);
+    expect(find.textContaining('do not need to change Wi-Fi'), findsOneWidget);
+    expect(find.text('7 compartments'), findsOneWidget);
+    expect(find.text('Light compartment 1'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
