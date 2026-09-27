@@ -33,6 +33,31 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    // Flutter's legacy service worker can keep an obsolete application bundle
+    // after a deployment. Remove it before starting the live demo so every
+    // visit loads the current GitHub Pages build.
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+        }
+
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map((name) => caches.delete(name)));
+        }
+      } catch (error) {
+        console.warn('Could not clear the previous web-app cache.', error);
+      }
+
+      const bootstrap = document.createElement('script');
+      bootstrap.src = `flutter_bootstrap.js?v=20260927`;
+      bootstrap.async = true;
+      document.body.appendChild(bootstrap);
+    })();
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -41,6 +66,5 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

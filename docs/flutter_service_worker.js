@@ -1,5 +1,8 @@
 'use strict';
 
+// This worker exists only to retire Flutter's former offline cache. Older
+// cached bootstrap files may still register it, so it must unregister itself
+// and refresh any open demo pages as soon as it activates.
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
@@ -7,25 +10,17 @@ self.addEventListener('install', () => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      try {
-        await self.registration.unregister();
-      } catch (e) {
-        console.warn('Failed to unregister the service worker:', e);
-      }
+      await self.registration.unregister();
 
-      try {
-        const clients = await self.clients.matchAll({
-          type: 'window',
-        });
-        // Reload clients to ensure they are not using the old service worker.
-        clients.forEach((client) => {
-          if (client.url && 'navigate' in client) {
-            client.navigate(client.url);
-          }
-        });
-      } catch (e) {
-        console.warn('Failed to navigate some service worker clients:', e);
-      }
-    })()
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map((name) => caches.delete(name)));
+
+      const clients = await self.clients.matchAll({ type: 'window' });
+      await Promise.all(
+        clients.map((client) =>
+          'navigate' in client ? client.navigate(client.url) : Promise.resolve(),
+        ),
+      );
+    })(),
   );
 });
