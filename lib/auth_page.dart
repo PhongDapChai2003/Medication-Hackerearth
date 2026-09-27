@@ -19,6 +19,23 @@ enum _AuthenticationMode { signIn, createAccount }
 
 enum _PendingEligibilityAction { createAccount, guest }
 
+int ageOnDate(DateTime birthDate, DateTime today) {
+  var age = today.year - birthDate.year;
+  final birthdayHasPassed =
+      today.month > birthDate.month ||
+      (today.month == birthDate.month && today.day >= birthDate.day);
+
+  if (!birthdayHasPassed) {
+    age--;
+  }
+
+  return age;
+}
+
+bool isAtLeast18OnDate(DateTime birthDate, DateTime today) {
+  return ageOnDate(birthDate, today) >= 18;
+}
+
 class AuthenticationPage extends StatefulWidget {
   final bool showBackButton;
   final bool allowGuest;
@@ -88,19 +105,6 @@ class _AuthenticationPageState extends State<AuthenticationPage> {
     });
   }
 
-  int ageForBirthDate(DateTime birthDate, DateTime today) {
-    var age = today.year - birthDate.year;
-    final birthdayHasPassed =
-        today.month > birthDate.month ||
-        (today.month == birthDate.month && today.day >= birthDate.day);
-
-    if (!birthdayHasPassed) {
-      age--;
-    }
-
-    return age;
-  }
-
   int? get selectedAge {
     final birthDate = selectedBirthDate;
 
@@ -108,12 +112,12 @@ class _AuthenticationPageState extends State<AuthenticationPage> {
       return null;
     }
 
-    return ageForBirthDate(birthDate, DateTime.now());
+    return ageOnDate(birthDate, DateTime.now());
   }
 
   bool get selectedBirthDateIsAdult {
-    final age = selectedAge;
-    return age != null && age >= 18;
+    final birthDate = selectedBirthDate;
+    return birthDate != null && isAtLeast18OnDate(birthDate, DateTime.now());
   }
 
   String formattedBirthDate(DateTime date) {

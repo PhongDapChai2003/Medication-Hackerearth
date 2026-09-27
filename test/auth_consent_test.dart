@@ -62,4 +62,13 @@ void main() {
 
     expect(find.text("What is your date of birth?"), findsOneWidget);
   });
+
+  test("Age gate accepts only customers who have reached age 18", () {
+    final today = DateTime(2026, 9, 27);
+
+    expect(isAtLeast18OnDate(DateTime(2008, 9, 27), today), isTrue);
+    expect(isAtLeast18OnDate(DateTime(2008, 9, 28), today), isFalse);
+    expect(isAtLeast18OnDate(DateTime(2009, 1, 1), today), isFalse);
+    expect(isAtLeast18OnDate(DateTime(1990, 12, 31), today), isTrue);
+  });
 }
