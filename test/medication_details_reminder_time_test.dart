@@ -1,10 +1,39 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app_language.dart';
+import 'package:flutter_application_1/medication.dart';
 import 'package:flutter_application_1/medication_details_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('chooses the next free pill-box compartment', () {
+    Medication medication(String id, int slot) => Medication(
+      id: id,
+      name: id,
+      dosage: '1 tablet',
+      instructions: 'Take daily',
+      pillBoxSlot: slot,
+    );
+
+    final medications = <Medication>[
+      medication('first', 0),
+      medication('second', 1),
+    ];
+
+    expect(
+      chooseAvailablePillBoxSlot(medications: medications, preferredSlot: 0),
+      2,
+    );
+    expect(
+      chooseAvailablePillBoxSlot(
+        medications: medications,
+        excludedMedicationId: 'first',
+        preferredSlot: 0,
+      ),
+      0,
+    );
+  });
+
   testWidgets('iPhone reminder time picker adds a selected time', (
     tester,
   ) async {

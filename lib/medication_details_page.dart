@@ -10,9 +10,33 @@ import 'healthcare_place_search.dart';
 import 'medication.dart';
 import 'medication_storage.dart';
 import 'pill_box_reminder_bridge.dart';
+import 'pill_box_service.dart';
 import 'rxnorm_service.dart';
 import 'smooth_action_button.dart';
 import 'time_helper.dart';
+
+int chooseAvailablePillBoxSlot({
+  required Iterable<Medication> medications,
+  String excludedMedicationId = "",
+  int preferredSlot = -1,
+}) {
+  final occupied = medications
+      .where((item) => item.id != excludedMedicationId)
+      .map((item) => item.pillBoxSlot)
+      .where((slot) => slot >= 0 && slot < PillBoxSlot.slotCount)
+      .toSet();
+
+  if (preferredSlot >= 0 &&
+      preferredSlot < PillBoxSlot.slotCount &&
+      !occupied.contains(preferredSlot)) {
+    return preferredSlot;
+  }
+
+  for (var slot = 0; slot < PillBoxSlot.slotCount; slot++) {
+    if (!occupied.contains(slot)) return slot;
+  }
+  return -1;
+}
 
 class MedicationDetailsPage extends StatefulWidget {
   final Medication? medication;
@@ -48,6 +72,7 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
   bool useCustomReminderTimes = false;
   List<TimeOfDay> customReminderTimes = <TimeOfDay>[];
   int pillBoxSlot = -1;
+  Set<int> occupiedPillBoxSlots = <int>{};
 
   bool isSaving = false;
   bool enablePharmacyCall = false;
@@ -108,6 +133,33 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
     pharmacyPhoneController.addListener(updatePreview);
     medicationNameFocusNode.addListener(handleMedicationNameFocusChanged);
     unawaited(loadSavedMedicationSuggestions());
+    unawaited(loadPillBoxAvailability());
+  }
+
+  Future<void> loadPillBoxAvailability() async {
+    try {
+      final medications = await MedicationStorage.loadCurrentLocalMedications();
+      final currentId = widget.medication?.id ?? "";
+      final occupied = medications
+          .where((item) => item.id != currentId)
+          .map((item) => item.pillBoxSlot)
+          .where((slot) => slot >= 0 && slot < PillBoxSlot.slotCount)
+          .toSet();
+      final availableSlot = chooseAvailablePillBoxSlot(
+        medications: medications,
+        excludedMedicationId: currentId,
+        preferredSlot: pillBoxSlot,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        occupiedPillBoxSlots = occupied;
+        pillBoxSlot = availableSlot;
+      });
+    } catch (_) {
+      // Medication saving remains available even if slot availability cannot
+      // be refreshed at this moment.
+    }
   }
 
   void updatePreview() {
@@ -719,13 +771,9 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
                               child: Text(tr('Cancel', 'Huỷ')),
                             ),
                             TextButton(
-                              key: const ValueKey<String>(
-                                'reminder-time-done',
-                              ),
-                              onPressed: () => Navigator.pop(
-                                pickerContext,
-                                selectedTime,
-                              ),
+                              key: const ValueKey<String>('reminder-time-done'),
+                              onPressed: () =>
+                                  Navigator.pop(pickerContext, selectedTime),
                               child: Text(tr('Done', 'Xong')),
                             ),
                           ],
@@ -1209,13 +1257,27 @@ class _MedicationDetailsPageState extends State<MedicationDetailsPage> {
                           child: Text(tr("Not assigned", "Chưa gán")),
                         ),
                         ...List<DropdownMenuItem<int>>.generate(
-                          7,
+                          PillBoxSlot.slotCount,
                           (index) => DropdownMenuItem<int>(
                             value: index,
+                            enabled: !occupiedPillBoxSlots.contains(index),
                             child: Text(
-                              tr(
-                                "Compartment ${index + 1}",
-                                "Ngăn ${index + 1}",
+                              occupiedPillBoxSlots.contains(index)
+                                  ? tr(
+                                      "Compartment ${index + 1} — In use",
+                                      "Ngăn ${index + 1} — Đang dùng",
+                                    )
+                                  : tr(
+                                      "Compartment ${index + 1}",
+                                      "Ngăn ${index + 1}",
+                                    ),
+                              style: TextStyle(
+                                color: occupiedPillBoxSlots.contains(index)
+                                    ? const Color(0xFFEF4444)
+                                    : null,
+                                fontWeight: occupiedPillBoxSlots.contains(index)
+                                    ? FontWeight.w700
+                                    : null,
                               ),
                             ),
                           ),

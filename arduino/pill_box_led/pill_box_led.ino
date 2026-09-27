@@ -18,11 +18,18 @@ constexpr uint8_t SLOT_COUNT = 7;
 constexpr uint8_t MAX_SCHEDULES = 28;
 constexpr unsigned long BLINK_MS = 500;
 constexpr unsigned long DISPLAY_SLICE_MS = 3;
-constexpr unsigned long DEBOUNCE_MS = 35;
-// Six short syllable-like pulses. An active buzzer has one fixed pitch, so
-// this creates a gentle original rhythm rather than copying a song melody.
-constexpr uint16_t BUZZER_STEP_MS[] = {
-  70, 70, 140, 80, 220, 180, 120, 70, 140, 70, 220, 900
+constexpr unsigned long MISSED_DOSE_DELAY_MS = 15UL * 60UL * 1000UL;
+// The magnet closes the reed switch when the lid is OPEN in this enclosure.
+// A short debounce makes the alert stop quickly after the lid is closed while
+// still filtering normal reed-switch contact bounce.
+constexpr unsigned long DEBOUNCE_MS = 15;
+// An active buzzer has one fixed pitch, so the two alerts use clearly
+// different on/off rhythms instead of different musical notes.
+constexpr uint16_t WRONG_LID_BUZZER_STEP_MS[] = {
+  90, 60, 90, 120, 180, 90, 90, 60, 240, 700
+};
+constexpr uint16_t MISSED_DOSE_BUZZER_STEP_MS[] = {
+  500, 250, 500, 250, 500, 2000
 };
 
 struct ScheduledDose {
@@ -44,6 +51,7 @@ unsigned long lastDisplaySliceAt = 0;
 bool buzzerPatternRunning = false;
 uint8_t buzzerPatternStep = 0;
 unsigned long buzzerPatternChangedAt = 0;
+unsigned long targetActivatedAt = 0;
 bool lastRaw[SLOT_COUNT] = {};
 bool stableOpen[SLOT_COUNT] = {};
 bool lidArmed[SLOT_COUNT] = {};
@@ -56,6 +64,8 @@ unsigned long clockStartedAt = 0;
 int lastScheduleMinute = -1;
 
 enum class LedColor : uint8_t { red, green };
+enum class BuzzerMode : uint8_t { off, wrongLid, missedDose };
+BuzzerMode buzzerMode = BuzzerMode::off;
 
 void releaseColumns() {
   for (uint8_t slot = 0; slot < SLOT_COUNT; slot++) {
@@ -92,16 +102,18 @@ void setBuzzer(bool on) {
   digitalWrite(BUZZER_PIN, on ? LOW : HIGH);
 }
 
-void updateBuzzerPattern(bool alarmActive) {
-  if (!alarmActive) {
+void updateBuzzerPattern(BuzzerMode requestedMode) {
+  if (requestedMode == BuzzerMode::off) {
     buzzerPatternRunning = false;
     buzzerPatternStep = 0;
+    buzzerMode = BuzzerMode::off;
     setBuzzer(false);
     return;
   }
 
   const unsigned long now = millis();
-  if (!buzzerPatternRunning) {
+  if (!buzzerPatternRunning || buzzerMode != requestedMode) {
+    buzzerMode = requestedMode;
     buzzerPatternRunning = true;
     buzzerPatternStep = 0;
     buzzerPatternChangedAt = now;
@@ -109,10 +121,17 @@ void updateBuzzerPattern(bool alarmActive) {
     return;
   }
 
-  if (now - buzzerPatternChangedAt >= BUZZER_STEP_MS[buzzerPatternStep]) {
-    buzzerPatternStep =
-        (buzzerPatternStep + 1) %
-        (sizeof(BUZZER_STEP_MS) / sizeof(BUZZER_STEP_MS[0]));
+  const uint16_t *steps = requestedMode == BuzzerMode::wrongLid
+      ? WRONG_LID_BUZZER_STEP_MS
+      : MISSED_DOSE_BUZZER_STEP_MS;
+  const uint8_t stepCount = requestedMode == BuzzerMode::wrongLid
+      ? sizeof(WRONG_LID_BUZZER_STEP_MS) /
+            sizeof(WRONG_LID_BUZZER_STEP_MS[0])
+      : sizeof(MISSED_DOSE_BUZZER_STEP_MS) /
+            sizeof(MISSED_DOSE_BUZZER_STEP_MS[0]);
+
+  if (now - buzzerPatternChangedAt >= steps[buzzerPatternStep]) {
+    buzzerPatternStep = (buzzerPatternStep + 1) % stepCount;
     buzzerPatternChangedAt = now;
     setBuzzer((buzzerPatternStep % 2) == 0);
   }
@@ -120,14 +139,14 @@ void updateBuzzerPattern(bool alarmActive) {
 
 void updateLed() {
   if (targetSlot < 0) {
-    updateBuzzerPattern(false);
+    updateBuzzerPattern(BuzzerMode::off);
     showLed(-1, LedColor::red, false);
     return;
   }
 
   const int wrongSlot = firstOpenWrongLid();
   if (wrongSlot >= 0) {
-    updateBuzzerPattern(true);
+    updateBuzzerPattern(BuzzerMode::wrongLid);
     unsigned long now = millis();
     if (now - lastBlinkAt >= BLINK_MS) {
       lastBlinkAt = now;
@@ -149,7 +168,9 @@ void updateLed() {
     return;
   }
 
-  updateBuzzerPattern(false);
+  const bool doseOverdue = millis() - targetActivatedAt >= MISSED_DOSE_DELAY_MS;
+  updateBuzzerPattern(
+      doseOverdue ? BuzzerMode::missedDose : BuzzerMode::off);
   showWrongSlice = false;
   showLed(targetSlot, LedColor::green, true);
 }
@@ -162,7 +183,7 @@ void lidOpened(uint8_t slot) {
     correctLidOpen = false;
     blinkOn = false;
     showWrongSlice = false;
-    updateBuzzerPattern(false);
+    updateBuzzerPattern(BuzzerMode::off);
     ledsOff();
     for (uint8_t nextSlot = 0; nextSlot < SLOT_COUNT; nextSlot++) {
       if (pendingSlots[nextSlot]) {
@@ -184,16 +205,16 @@ void lidClosed(uint8_t slot) {
 void scanSwitches() {
   bool raw[SLOT_COUNT] = {};
 
-  // Do not drive LEDs while reading the shared reed-switch row. A normally
-  // open reed is closed by the magnet when the lid is closed, so D4 reads LOW
-  // for closed and HIGH for open.
+  // Do not drive LEDs while reading the shared reed-switch row. In the actual
+  // box, opening a lid brings its magnet to the reed switch. Therefore LOW
+  // means lid open and HIGH means lid closed.
   ledsOff();
   pinMode(SENSOR_ROW_PIN, INPUT_PULLUP);
   for (uint8_t slot = 0; slot < SLOT_COUNT; slot++) {
     pinMode(COLUMN_PINS[slot], OUTPUT);
     digitalWrite(COLUMN_PINS[slot], LOW);
     delayMicroseconds(60);
-    raw[slot] = digitalRead(SENSOR_ROW_PIN) == HIGH;
+    raw[slot] = digitalRead(SENSOR_ROW_PIN) == LOW;
     pinMode(COLUMN_PINS[slot], INPUT);
   }
   pinMode(SENSOR_ROW_PIN, INPUT);
@@ -214,12 +235,13 @@ void scanSwitches() {
 
 void selectSlot(int slot) {
   targetSlot = slot;
+  targetActivatedAt = millis();
   correctLidOpen = false;
   blinkOn = true;
   lastBlinkAt = millis();
   showWrongSlice = false;
   lastDisplaySliceAt = millis();
-  updateBuzzerPattern(false);
+  updateBuzzerPattern(BuzzerMode::off);
   for (uint8_t lid = 0; lid < SLOT_COUNT; lid++) {
     lidArmed[lid] = !stableOpen[lid];
   }
@@ -233,7 +255,7 @@ void clearReminder() {
   showWrongSlice = false;
   for (uint8_t slot = 0; slot < SLOT_COUNT; slot++) pendingSlots[slot] = false;
   for (uint8_t slot = 0; slot < SLOT_COUNT; slot++) lidArmed[slot] = false;
-  updateBuzzerPattern(false);
+  updateBuzzerPattern(BuzzerMode::off);
   ledsOff();
 }
 

@@ -47,9 +47,11 @@ Use seven 1N4148 diodes total, one for each reed switch. The stripe must face
 the compartment column. Without these diodes, several closed lids can connect
 the columns together and illuminate the wrong LEDs.
 
-The specified reed switch is normally open. With the magnet near the switch,
-the closed lid closes the electrical contact. Opening the lid moves the magnet
-away and opens the contact. The firmware handles this inverted lid logic.
+The specified reed switch is normally open. In this enclosure, opening the lid
+brings the magnet next to the reed switch and closes the electrical contact.
+Closing the lid moves the magnet away and opens the contact. The firmware reads
+LOW as open and HIGH as closed, with a short debounce so a wrong-lid alert stops
+quickly after that lid is closed.
 
 ## Active buzzer wiring
 
@@ -69,7 +71,10 @@ levels in `wrongLidAlarm()` and `configureHardware()`.
    quieter original two-chirp alert. The correct compartment remains visibly
    green while the wrong red light blinks.
 4. Closing the wrong lid stops the buzzer and restores the correct green light.
-5. The Arduino scans LEDs and reed switches at different times so their shared
+5. If the correct lid is not opened within 15 minutes, a slower three-beep
+   missed-dose alert starts. This is different from the fast wrong-lid sound.
+   Opening the correct lid stops it and turns the green light off.
+6. The Arduino scans LEDs and reed switches at different times so their shared
    matrix connections do not fight each other.
 
 ## Upload and test
@@ -107,3 +112,5 @@ minute without the app staying connected, provided the board remains powered.
 Opening the correct lid turns the green light off. Opening a wrong lid keeps the
 correct green guide lit, blinks that wrong compartment red, and plays the alert
 rhythm until the wrong lid closes.
+If the correct lid stays closed for 15 minutes after the reminder begins, the
+separate slower missed-dose alarm repeats until the correct lid is opened.

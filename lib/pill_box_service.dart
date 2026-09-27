@@ -128,9 +128,22 @@ class _PillBoxBleConnection {
         const PillBoxResponse(ok: true, message: 'Pill box connected.'),
       );
     }
-    return _connecting ??= _connectInternal().whenComplete(() {
+    return _connecting ??= _connectWithOverallTimeout().whenComplete(() {
       _connecting = null;
     });
+  }
+
+  Future<PillBoxResponse> _connectWithOverallTimeout() async {
+    try {
+      return await _connectInternal().timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      await disconnect();
+      return const PillBoxResponse(
+        ok: false,
+        message:
+            'Pill box was not found within 12 seconds. Check that it is powered, nearby, and not connected to another phone.',
+      );
+    }
   }
 
   Future<PillBoxResponse> _connectInternal() async {
@@ -158,14 +171,14 @@ class _PillBoxBleConnection {
     try {
       await _ble.statusStream
           .firstWhere((status) => status == BleStatus.ready)
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 4));
       final device = await _ble
           .scanForDevices(
             withServices: <Uuid>[serviceUuid],
             scanMode: ScanMode.lowLatency,
           )
           .first
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 6));
 
       final connected = Completer<void>();
       await _connectionSubscription?.cancel();
@@ -175,7 +188,7 @@ class _PillBoxBleConnection {
             servicesWithCharacteristicsToDiscover: <Uuid, List<Uuid>>{
               serviceUuid: <Uuid>[commandUuid, responseUuid],
             },
-            connectionTimeout: const Duration(seconds: 8),
+            connectionTimeout: const Duration(seconds: 6),
           )
           .listen(
             (update) {
@@ -195,7 +208,7 @@ class _PillBoxBleConnection {
               if (!connected.isCompleted) connected.completeError(error);
             },
           );
-      await connected.future.timeout(const Duration(seconds: 10));
+      await connected.future.timeout(const Duration(seconds: 6));
       return const PillBoxResponse(ok: true, message: 'Pill box connected.');
     } on TimeoutException {
       return const PillBoxResponse(

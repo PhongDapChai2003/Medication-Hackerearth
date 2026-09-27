@@ -29,7 +29,10 @@ class _PillBoxPageState extends State<PillBoxPage> {
     FocusScope.of(context).unfocus();
     setState(() {
       isSending = true;
-      status = '';
+      status = tr(
+        'Looking for Medication Pill Box…',
+        'Đang tìm Hộp thuốc thông minh…',
+      );
       lastRequestWorked = null;
     });
 
@@ -37,7 +40,16 @@ class _PillBoxPageState extends State<PillBoxPage> {
     try {
       result = await action();
       if (result.ok && syncRemindersAfterSuccess) {
-        final synchronized = await PillBoxReminderBridge.syncScheduleNow();
+        if (mounted) {
+          setState(() {
+            status = tr(
+              'Connected. Sending reminder times…',
+              'Đã kết nối. Đang gửi giờ nhắc…',
+            );
+          });
+        }
+        final synchronized = await PillBoxReminderBridge.syncScheduleNow()
+            .timeout(const Duration(seconds: 15), onTimeout: () => false);
         result = PillBoxResponse(
           ok: synchronized,
           message: synchronized

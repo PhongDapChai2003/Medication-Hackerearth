@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
@@ -16,6 +17,10 @@ import 'rxnorm_service.dart';
 import 'route_transitions.dart';
 import 'smooth_action_button.dart';
 import 'time_helper.dart';
+
+bool get isNativeIos => !kIsWeb && Platform.isIOS;
+bool get isNativeAndroid => !kIsWeb && Platform.isAndroid;
+bool get isNativeMacOS => !kIsWeb && Platform.isMacOS;
 
 String extractLabelQuantity(List<String> lines) {
   final labeledQuantity = RegExp(
@@ -249,11 +254,11 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   bool get isOcrSupportedOnThisPlatform {
-    return Platform.isIOS || Platform.isAndroid || Platform.isMacOS;
+    return isNativeIos || isNativeAndroid || isNativeMacOS;
   }
 
   bool get isCameraOcrSupportedOnThisPlatform {
-    return Platform.isIOS || Platform.isAndroid;
+    return isNativeIos || isNativeAndroid;
   }
 
   void showOcrPlatformMessage() {
@@ -759,11 +764,11 @@ class _ScanPageState extends State<ScanPage> {
         }
       }
 
-      if (Platform.isIOS || Platform.isMacOS) {
+      if (isNativeIos || isNativeMacOS) {
         try {
           await readWithNativeVision();
         } catch (_) {
-          if (!Platform.isIOS) {
+          if (!isNativeIos) {
             rethrow;
           }
 
@@ -2738,10 +2743,14 @@ class _ScanPageState extends State<ScanPage> {
                     const SizedBox(height: 8),
                     Text(
                       language == "en"
-                          ? (Platform.isMacOS
+                          ? (kIsWeb
+                                ? "Scanning is available in the iPhone and Android app. You can still enter medication manually in this web demo."
+                                : isNativeMacOS
                                 ? "Choose one or more prescription-label photos. Apple Vision will read and combine the text on this Mac."
                                 : "Take one or more photos of the prescription label. The app will combine the text.")
-                          : (Platform.isMacOS
+                          : (kIsWeb
+                                ? "Tính năng quét có trong ứng dụng iPhone và Android. Bạn vẫn có thể nhập thuốc thủ công trong bản web demo."
+                                : isNativeMacOS
                                 ? "Chọn một hoặc nhiều ảnh nhãn thuốc. Apple Vision sẽ đọc và ghép chữ trên máy Mac này."
                                 : "Chụp một hoặc nhiều ảnh nhãn thuốc. Ứng dụng sẽ ghép chữ lại."),
                       style: const TextStyle(
@@ -2759,7 +2768,7 @@ class _ScanPageState extends State<ScanPage> {
                       onClearAll: clearAllImages,
                     ),
                     const SizedBox(height: 24),
-                    if (!Platform.isMacOS) ...[
+                    if (!kIsWeb && !isNativeMacOS) ...[
                       SmoothActionButton(
                         key: widget.cameraGuideTargetKey,
                         icon: Icons.camera_alt_rounded,
@@ -2775,22 +2784,23 @@ class _ScanPageState extends State<ScanPage> {
                       ),
                       const SizedBox(height: 14),
                     ],
-                    SmoothActionButton(
-                      key: widget.photoLibraryGuideTargetKey,
-                      icon: Icons.photo_library_rounded,
-                      label: hasImages
-                          ? (language == "en"
-                                ? "Add Photos from Library"
-                                : "Thêm Ảnh Từ Thư Viện")
-                          : (language == "en"
-                                ? "Choose from Photo Library"
-                                : "Chọn Từ Thư Viện Ảnh"),
-                      outlined: !Platform.isMacOS,
-                      onPressed: () {
-                        unawaited(pickImageFromGallery());
-                      },
-                      isLoading: isOpeningGallery,
-                    ),
+                    if (!kIsWeb)
+                      SmoothActionButton(
+                        key: widget.photoLibraryGuideTargetKey,
+                        icon: Icons.photo_library_rounded,
+                        label: hasImages
+                            ? (language == "en"
+                                  ? "Add Photos from Library"
+                                  : "Thêm Ảnh Từ Thư Viện")
+                            : (language == "en"
+                                  ? "Choose from Photo Library"
+                                  : "Chọn Từ Thư Viện Ảnh"),
+                        outlined: !isNativeMacOS,
+                        onPressed: () {
+                          unawaited(pickImageFromGallery());
+                        },
+                        isLoading: isOpeningGallery,
+                      ),
                     if (hasImages) ...[
                       const SizedBox(height: 22),
                       ScanSuccessCard(imageCount: selectedImages.length),
@@ -3323,10 +3333,10 @@ class ScanQualityTipCard extends StatelessWidget {
           Expanded(
             child: Text(
               language == "en"
-                  ? (Platform.isMacOS
+                  ? (isNativeMacOS
                         ? "Scan tip: choose 2–3 clear, close photos. Include the medication name, strength, Qty, directions, pharmacy name, and phone number."
                         : "Scan tip: take 2–3 clear photos. Include the medication name, dosage, Qty, directions, pharmacy name, and pharmacy phone number.")
-                  : (Platform.isMacOS
+                  : (isNativeMacOS
                         ? "Mẹo quét: chọn 2–3 ảnh rõ, chụp gần. Bao gồm tên thuốc, hàm lượng, Qty, hướng dẫn, tên và số điện thoại nhà thuốc."
                         : "Mẹo quét: chụp 2–3 ảnh rõ. Bao gồm tên thuốc, liều lượng, Qty, hướng dẫn, tên nhà thuốc và số điện thoại."),
               style: const TextStyle(
@@ -3535,10 +3545,10 @@ class ScanPreviewCard extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           language == "en"
-              ? (Platform.isMacOS
+              ? (isNativeMacOS
                     ? "Choose multiple clear photos if the label wraps around the bottle."
                     : "Take multiple clear photos if the label wraps around the bottle.")
-              : (Platform.isMacOS
+              : (isNativeMacOS
                     ? "Chọn nhiều ảnh rõ nếu nhãn thuốc quấn quanh chai."
                     : "Chụp nhiều ảnh rõ nếu nhãn thuốc bị quấn quanh chai."),
           textAlign: TextAlign.center,
