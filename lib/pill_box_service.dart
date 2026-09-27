@@ -40,19 +40,29 @@ typedef PillBoxCommandSender = Future<PillBoxResponse> Function(String command);
 class PillBoxService {
   PillBoxService({this.commandSender});
 
-  static final _PillBoxBleConnection _connection = _PillBoxBleConnection();
+  static _PillBoxBleConnection? _sharedConnection;
   static const int maxScheduleEntries = 28;
   final PillBoxCommandSender? commandSender;
 
-  bool get isConnected => _connection.isConnected;
+  static const PillBoxResponse _webUnsupportedResponse = PillBoxResponse(
+    ok: false,
+    message:
+        'Bluetooth pill-box connection is available in the iPhone and Android app.',
+  );
+
+  _PillBoxBleConnection get _connection =>
+      _sharedConnection ??= _PillBoxBleConnection();
+
+  bool get isConnected => !kIsWeb && _connection.isConnected;
 
   Future<PillBoxResponse> connect() {
     if (commandSender != null) return commandSender!('STATUS');
+    if (kIsWeb) return Future.value(_webUnsupportedResponse);
     return _connection.connect();
   }
 
   Future<PillBoxResponse> disconnect() async {
-    if (commandSender == null) await _connection.disconnect();
+    if (commandSender == null && !kIsWeb) await _connection.disconnect();
     return const PillBoxResponse(ok: true, message: 'Pill box disconnected.');
   }
 
@@ -89,7 +99,9 @@ class PillBoxService {
   }
 
   Future<PillBoxResponse> _send(String command) {
-    return commandSender?.call(command) ?? _connection.send(command);
+    if (commandSender != null) return commandSender!(command);
+    if (kIsWeb) return Future.value(_webUnsupportedResponse);
+    return _connection.send(command);
   }
 
   // The BLE link is shared so background reminder checks can reuse it.
